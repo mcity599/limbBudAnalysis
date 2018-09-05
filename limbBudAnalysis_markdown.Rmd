@@ -1,0 +1,170 @@
+---
+title: "limbBudAnalysis"
+output: pdf_document
+---
+
+DESeq2
+```{r}
+rm(list=ls())
+
+library(DESeq2)
+library(edgeR)
+library(ggplot2)
+library(stringr)
+library(ggplot2)
+library(matrixStats)
+library(pheatmap)
+```
+
+```{r}
+# Read in count data:
+countData <- as.matrix(read.csv("~/rnaSeqData/limbBudData/prepDE_counts/limbBud_geneCountMatrix.csv", row.names="gene_id"))
+
+# Load sample information:
+sampleInformation <- read.csv("~/Documents/limbBudAnalysis/limbBudPhenodata.csv")
+# Check that sample ID match between countData and sampleInformation
+all(sampleInformation$ids %in% colnames(countData))
+
+# Estimate new counts and variance
+dds <- DESeqDataSetFromMatrix(countData = countData, colData = sampleInformation, design = ~ TissueType )
+keep <- rowSums(cpm(counts(dds))>2) >=3
+table(keep)
+dds <- dds[keep,]
+```
+
+```{r}
+#Look at the PCA
+pcaData <- plotPCA(rlog(dds,blind=T), intgroup=c("TissueType"), returnData=TRUE)
+plot(pcaData$PC1, pcaData$PC2,col="white") | text(pcaData$PC1, pcaData$PC2,sampleInformation$TissueType,cex=1)
+
+plotPCA(rlog(dds,blind=T), intgroup="Experiment")+theme_bw()
+
+plotPCA(rlog(dds,blind=T), intgroup="TissueType")+theme_bw()
+pdf("/home/mcity599/Documents/limbBudAnalysis/qualityPlots/PCA_DESeq2_tissueType.pdf")
+plotPCA(rlog(dds,blind=T), intgroup="TissueType")+theme_bw()          
+while (!is.null(dev.list()))  
+  dev.off()
+
+plotPCA(rlog(dds,blind=T), intgroup="Experiment")+theme_bw()
+pdf("/home/mcity599/Documents/limbBudAnalysis/qualityPlots/PCA_DESeq2_experiment.pdf")
+plotPCA(rlog(dds,blind=T), intgroup="Experiment")+theme_bw()          
+while (!is.null(dev.list()))  
+  dev.off()
+```
+
+```{r}
+dds <- DESeq(dds)
+# estimating size factors
+# estimating dispersions
+# gene-wise dispersion estimates
+# mean-dispersion relationship
+# final dispersion estimates
+# fitting model and testing
+
+# Visualise dispersion:
+plotDispEsts( dds)
+pdf("/home/mcity599/Documents/limbBudAnalysis/qualityPlots/dispersion_DESeq2.pdf")
+plotDispEsts( dds)
+while (!is.null(dev.list()))
+  dev.off()
+```
+
+
+
+Identifying DE
+```{r}
+# Generate results tables
+DistVsProx <- results(dds, contrast=c("TissueType", "Dist", "Prox"))
+
+# Apply lfcShrink
+DistVsProx.lfc <- lfcShrink(dds, contrast=c("TissueType", "Dist", "Prox"), res = DistVsProx)
+
+# Remove rows where padj = na
+DvsP_results <- DistVsProx.lfc[!is.na(DistVsProx.lfc$padj),]
+
+# Order the results table, retain padj < 0.05
+DvsP_ordered <- DvsP_results[order(DvsP_results$padj),]
+statisticallySignificantShrunkPadj <- DvsP_ordered[as.vector(na.omit(DvsP_ordered$padj < 0.05)),]
+statisticallySignificantShrunkPadj
+
+# Order by log2FC, retain log2FC >1 or < -1
+logOrd <- statisticallySignificantShrunkPadj[order(statisticallySignificantShrunkPadj$log2FoldChange),]
+DEmstrgTagsNeg <- logOrd[as.vector(na.omit(logOrd$log2FoldChange < -1)),]
+DEmstrgTagsPos <- logOrd[as.vector(na.omit(logOrd$log2FoldChange > 1)),]
+## From manual checks I can confirm that "negative" probes are upregulated in Prox relative to Dist
+
+# Pull out tags with gene names (these will be used for most informative plots)
+limbBudNegRegGenes <- mstrgToGene[na.omit(match(rownames(DEmstrgTagsNeg),mstrgToGene[,1])),2]
+limbBudPosRegGenes <- mstrgToGene[na.omit(match(rownames(DEmstrgTagsPos),mstrgToGene[,1])),2]
+
+# Remember that some genes are labelled with geneXXXX instead of mstrg tag. These can be converted using the geneId converter from Xenbase:
+Xlaevis9.2 <- read.delim("~/Documents/xenbaseFiles/Xlaevis9.2.geneID-geneName_Conversion")
+
+limbBudNegRegGenes <- c(limbBudNegRegGenes,as.vector(Xlaevis9.2[as.vector(na.omit(match(rownames(DEmstrgTagsNeg)[grep("gene",rownames(DEmstrgTagsNeg))],Xlaevis9.2[,1]))),2]))
+limbBudPosRegGenes <- c(limbBudPosRegGenes,as.vector(Xlaevis9.2[as.vector(na.omit(match(rownames(DEmstrgTagsPos)[grep("gene",rownames(DEmstrgTagsPos))],Xlaevis9.2[,1]))),2]))
+```
+
+
+Make heatmaps of DE gene data
+- Not when doing this I have not attached gene names yet. This is because many probes do not have an associated gene name, and much information would be lost if I filtered based on gene names. 
+  - cf length(rownames(DEmstrgTagsNeg)) # 1463, while length(limbBudNegRegGenes) # 844
+```{r}
+biocLite("pheatmap")
+library(pheatmap)
+
+rld <- rlog(dds,blind = F)
+###regularized logarithm or rlog normalisation which is suited for data visualisation (unlike the one we used for actually testing). It incorporates a prior on the sample differences (Love, Huber, and Anders 2014). , data on the log2 scale which has been normalized with respect to library size or other normalization factors. Difference to the average expression of every differentially expressed gene. the counts are transformed using regularized logarithm (Love, Huber, and Anders 2014).
+# rlog is a way to turn RNA-seq data (in which gene variance is often related to the mean) to (approximately) homoskedastic data (variance is not related to the mean)
+
+matNegGenes <- assay(rld)[which(rownames(assay(rld)) %in%rownames(DEmstrgTagsNeg)),]
+matNegGenes <- matNegGenes - rowMeans(matNegGenes)
+matPosGenes <- assay(rld)[which(rownames(assay(rld)) %in%rownames(DEmstrgTagsPos)),]
+matPosGenes <- matPosGenes - rowMeans(matPosGenes)
+
+pdf("/home/mcity599/Documents/limbBudAnalysis/DEgene_heatmaps/DEgeneHeatmaps_DistVsProx.pdf")
+pheatmap(rbind(matNegGenes,matPosGenes),annotation_col = groupAnnotation, show_rownames = F,cluster_row=T,cluster_col=T,fontsize=6) 
+while (!is.null(dev.list()))
+  dev.off()
+
+pdf("/home/mcity599/Documents/limbBudAnalysis/DEgene_heatmaps/DEgeneHeatmaps_UpregulatedInProx.pdf")
+pheatmap(rbind(matNegGenes),annotation_col = groupAnnotation, show_rownames = F,cluster_row=T,cluster_col=T,fontsize=6) 
+while (!is.null(dev.list()))
+  dev.off()
+
+pdf("/home/mcity599/Documents/limbBudAnalysis/DEgene_heatmaps/DEgeneHeatmaps_UpregulatedInDist.pdf")
+pheatmap(rbind(matPosGenes),annotation_col = groupAnnotation, show_rownames = F,cluster_row=T,cluster_col=T,fontsize=6) 
+while (!is.null(dev.list()))
+  dev.off()
+```
+
+Not necessary to run, but useful in case I later want to look at my rld with gene names. 
+```{r}
+# Add names to rld. Not just mstrg tags but also geneXXXX names using Xlaevis9.2
+rldOrigNames <- names(rld)
+names(rld) <- mstrgToGene[match(names(rld),mstrgToGene[,1]),2]
+length(is.na(names(rld))) # 23392
+repTest <- replace(names(rld),grep("gene",rldOrigNames),as.vector(Xlaevis9.2[match(rldOrigNames[grep("gene",rldOrigNames)],as.vector(Xlaevis9.2[,1])),2])) # The replace command takes a vector of e.g., names, a vector of names to be changed, and a vector of replacement items.
+names(rld) <- repTest
+```
+
+
+Investigate genes:
+```{r}
+# Trim gene names to refSeq for easier downstream (remove .L or .S)
+library(limma)
+upregulatedProxGenes <- strsplit2(limbBudNegRegGenes,".",fixed=T)[,1]
+upregulatedDistGenes <- strsplit2(limbBudPosRegGenes,".",fixed=T)[,1]
+write.csv(upregulatedProxGenes,file = '~/Documents/limbBudAnalysis/geneLists/upregulatedInProx.csv')
+write.csv(upregulatedDistGenes,file = '~/Documents/limbBudAnalysis/geneLists/upregulatedInDist.csv')
+
+length(unique(upregulatedDistGenes))
+length(unique(upregulatedProxGenes))
+
+limbBudNegRegGenes[1:10]
+limbBudPosRegGenes[1:10]
+```
+
+
+
+
+
