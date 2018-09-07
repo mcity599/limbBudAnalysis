@@ -27,7 +27,7 @@ all(sampleInformation$ids %in% colnames(countData))
 
 # Estimate new counts and variance
 dds <- DESeqDataSetFromMatrix(countData = countData, colData = sampleInformation, design = ~ TissueType )
-keep <- rowSums(cpm(counts(dds))>2) >=3
+keep <- rowSums(cpm(counts(dds))>2) >=2
 table(keep)
 dds <- dds[keep,]
 ```
@@ -37,7 +37,7 @@ dds <- dds[keep,]
 pcaData <- plotPCA(rlog(dds,blind=T), intgroup=c("TissueType"), returnData=TRUE)
 plot(pcaData$PC1, pcaData$PC2,col="white") | text(pcaData$PC1, pcaData$PC2,sampleInformation$TissueType,cex=1)
 
-plotPCA(rlog(dds,blind=T), intgroup="Experiment")+theme_bw()
+plotPCA(rlog(dds,blind=T), intgroup="TissueType")+theme_bw()
 
 plotPCA(rlog(dds,blind=T), intgroup="TissueType")+theme_bw()
 pdf("/home/mcity599/Documents/limbBudAnalysis/qualityPlots/PCA_DESeq2_tissueType.pdf")
@@ -74,10 +74,22 @@ while (!is.null(dev.list()))
 Identifying DE
 ```{r}
 # Generate results tables
-DistVsProx <- results(dds, contrast=c("TissueType", "Dist", "Prox"))
+DistVsProx <- results(dds, contrast=c("TissueType", "Dist", "Prox"), alpha = 0.05)
+summary(DistVsProx)
+# out of 24448 with nonzero total read count
+# adjusted p-value < 0.05
+# LFC > 0 (up)       : 3418, 14%
+# LFC < 0 (down)     : 4048, 17%
+# outliers [1]       : 0, 0%
+# low counts [2]     : 0, 0%
+# (mean count < 41)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+
 
 # Apply lfcShrink
 DistVsProx.lfc <- lfcShrink(dds, contrast=c("TissueType", "Dist", "Prox"), res = DistVsProx)
+summary(DistVsProx.lfc)
 
 # Remove rows where padj = na
 DvsP_results <- DistVsProx.lfc[!is.na(DistVsProx.lfc$padj),]
@@ -89,19 +101,67 @@ statisticallySignificantShrunkPadj
 
 # Order by log2FC, retain log2FC >1 or < -1
 logOrd <- statisticallySignificantShrunkPadj[order(statisticallySignificantShrunkPadj$log2FoldChange),]
-DEmstrgTagsNeg <- logOrd[as.vector(na.omit(logOrd$log2FoldChange < -1)),]
-DEmstrgTagsPos <- logOrd[as.vector(na.omit(logOrd$log2FoldChange > 1)),]
+DEmstrgTagsNeg <- logOrd[as.vector(na.omit(logOrd$log2FoldChange < -1.5)),]
+DEmstrgTagsPos <- logOrd[as.vector(na.omit(logOrd$log2FoldChange > 1.5)),]
 ## From manual checks I can confirm that "negative" probes are upregulated in Prox relative to Dist
+# Means that Positive tags are upregulated in Dist relative to Prox
+```
+
 
 # Pull out tags with gene names (these will be used for most informative plots)
-limbBudNegRegGenes <- mstrgToGene[na.omit(match(rownames(DEmstrgTagsNeg),mstrgToGene[,1])),2]
-limbBudPosRegGenes <- mstrgToGene[na.omit(match(rownames(DEmstrgTagsPos),mstrgToGene[,1])),2]
+#### Remember that mstrgToGene is a file I must make myself, and it will differ from experiment to experiment!
+```{r}
+stringtieMergedLimbBud <- read.delim("~/rnaSeqData/limbBudData/stringtieMergedLimbBud.gtf", header=FALSE, comment.char="#")
+stringtieMergedLimbBud[1:3,]
+dim(stringtieMergedLimbBud)
+fgf8Cor <- grep("fgf8",as.character(stringtieMergedLimbBud[,9]))
+as.vector(stringtieMergedLimbBud[fgf8Cor,9])
+
+library(limma)
+strsplit2(as.vector(stringtieMergedLimbBud[fgf8Cor,9]),";")[,c(1,3)]
+# Since I'm working with gene counts, I will first try unique(MSTRGxxx) 
+
+gd <- strsplit2(as.vector(stringtieMergedLimbBud[,9]),";")[,c(1,3)]
+gd[1:10,]
+length(gd[,1]) # 755846
+length(unique(gd[,1]))
+# 66,212 unique MSTRG
+mstrgCodes <- strsplit2(unique(gd[,1])," ",fixed=T)[,2]
+mstrgCodes[1:10]
+gd[1:10,]
+gd <- cbind(strsplit2(gd[,1]," ",fixed=T)[,2],gd[,2])
+gd[1:100,]
+mstrgToGeneLimbBud <- gd[grep("gene_name",as.vector(gd[,2])),]
+dim(mstrgToGeneLimbBud)
+length(unique(mstrgToGeneLimbBud[,1])) # 53259 mstrg tags
+length(unique(mstrgToGeneLimbBud[,2])) # 49109 gene names
+## Therefore some genes have multiple mstrg tags. 
+# Which will be ok because the DESEq2 results are per mstrg. Multiple mstrg might map back to the same gene, but I won't have the issue of an mstrg tag mapping to the wrong gene (which could happen if this situation was reversed).
+
+
+mstrgToGeneLimbBud[1:100,]
+## Actually, when I look at the object, I can already see instances where one mstrg code encodes for multiple genes. e.g., mstrg31 matches ND1 and tRNA-Ile
+
+mstrgToGeneLimbBud <- cbind(mstrgToGeneLimbBud[,1],strsplit2(as.vector(mstrgToGeneLimbBud[,2])," ",fixed=T)[,3])
+save(mstrgToGeneLimbBud,file='/home/mcity599/rnaSeqData/limbBudData/mstrgToGeneLimbBud.RData')
+rm(stringtieMergedLimbBud)
+rm(mstrgCodes)
+rm(gd)
+```
+
+```{r}
+stringtieMergedLimbBud <- read.delim("~/rnaSeqData/limbBudData/stringtieMergedLimbBud.gtf", header=FALSE, comment.char="#")
+
+
+limbBudNegRegGenes <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrgTagsNeg),mstrgToGeneLimbBud[,1])),2]
+limbBudPosRegGenes <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrgTagsPos),mstrgToGeneLimbBud[,1])),2]
 
 # Remember that some genes are labelled with geneXXXX instead of mstrg tag. These can be converted using the geneId converter from Xenbase:
-Xlaevis9.2 <- read.delim("~/Documents/xenbaseFiles/Xlaevis9.2.geneID-geneName_Conversion")
+## Holding off on this until I can confirm that geneXXXX in Xlaevis 9.2 is going to be the same for this experiment (i.e., remember that MSTRG tags are experiment-specific - are geneXXXX ID also?)
+# Xlaevis9.2 <- read.delim("~/Documents/xenbaseFiles/Xlaevis9.2.geneID-geneName_Conversion")
 
-limbBudNegRegGenes <- c(limbBudNegRegGenes,as.vector(Xlaevis9.2[as.vector(na.omit(match(rownames(DEmstrgTagsNeg)[grep("gene",rownames(DEmstrgTagsNeg))],Xlaevis9.2[,1]))),2]))
-limbBudPosRegGenes <- c(limbBudPosRegGenes,as.vector(Xlaevis9.2[as.vector(na.omit(match(rownames(DEmstrgTagsPos)[grep("gene",rownames(DEmstrgTagsPos))],Xlaevis9.2[,1]))),2]))
+# limbBudNegRegGenes <- c(limbBudNegRegGenes,as.vector(Xlaevis9.2[as.vector(na.omit(match(rownames(DEmstrgTagsNeg)[grep("gene",rownames(DEmstrgTagsNeg))],Xlaevis9.2[,1]))),2]))
+# limbBudPosRegGenes <- c(limbBudPosRegGenes,as.vector(Xlaevis9.2[as.vector(na.omit(match(rownames(DEmstrgTagsPos)[grep("gene",rownames(DEmstrgTagsPos))],Xlaevis9.2[,1]))),2]))
 ```
 
 
@@ -120,6 +180,12 @@ matNegGenes <- assay(rld)[which(rownames(assay(rld)) %in%rownames(DEmstrgTagsNeg
 matNegGenes <- matNegGenes - rowMeans(matNegGenes)
 matPosGenes <- assay(rld)[which(rownames(assay(rld)) %in%rownames(DEmstrgTagsPos)),]
 matPosGenes <- matPosGenes - rowMeans(matPosGenes)
+
+groupAnnotation = data.frame(
+                    Tissue = factor(c(rep("Dist",2),rep("Mid",2),rep("Prox",2))), Experiment = factor(c(rep("Black",3),rep("Red",3)))[c(1,4,2,5,3,6)]
+                )
+rownames(groupAnnotation) = sampleInformation$id
+groupAnnotation
 
 pdf("/home/mcity599/Documents/limbBudAnalysis/DEgene_heatmaps/DEgeneHeatmaps_DistVsProx.pdf")
 pheatmap(rbind(matNegGenes,matPosGenes),annotation_col = groupAnnotation, show_rownames = F,cluster_row=T,cluster_col=T,fontsize=6) 
