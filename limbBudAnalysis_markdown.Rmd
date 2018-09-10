@@ -155,6 +155,10 @@ stringtieMergedLimbBud <- read.delim("~/rnaSeqData/limbBudData/stringtieMergedLi
 
 limbBudNegRegGenes <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrgTagsNeg),mstrgToGeneLimbBud[,1])),2]
 limbBudPosRegGenes <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrgTagsPos),mstrgToGeneLimbBud[,1])),2]
+limbBud_PvD_upProx <- limbBudNegRegGenes
+limbBud_PvD_upDist <- limbBudPosRegGenes
+save(limbBud_PvD_upProx,file='~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_PvD_upProx.RData')
+save(limbBud_PvD_upDist,file='~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_PvD_upDist.RData')
 
 # Remember that some genes are labelled with geneXXXX instead of mstrg tag. These can be converted using the geneId converter from Xenbase:
 ## Holding off on this until I can confirm that geneXXXX in Xlaevis 9.2 is going to be the same for this experiment (i.e., remember that MSTRG tags are experiment-specific - are geneXXXX ID also?)
@@ -233,4 +237,231 @@ limbBudPosRegGenes[1:10]
 
 
 
+Compare Mid-Prox and Mid-Dist
+=========================================
 
+Identifying DE
+```{r}
+# Generate results tables
+MidVsProx <- results(dds, contrast=c("TissueType", "Mid", "Prox"), alpha = 0.05)
+MidVsDist <- results(dds, contrast=c("TissueType", "Mid", "Dist"), alpha = 0.05)
+summary(MidVsProx)
+# out of 24448 with nonzero total read count
+# adjusted p-value < 0.05
+# LFC > 0 (up)       : 893, 3.7%
+# LFC < 0 (down)     : 1254, 5.1%
+# outliers [1]       : 0, 0%
+# low counts [2]     : 0, 0%
+# (mean count < 41)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+summary(MidVsDist)
+# out of 24448 with nonzero total read count
+# adjusted p-value < 0.05
+#LFC > 0 (up)       : 3434, 14%
+#LFC < 0 (down)     : 2982, 12%
+#outliers [1]       : 0, 0%
+#low counts [2]     : 0, 0%
+#(mean count < 41)
+#[1] see 'cooksCutoff' argument of ?results
+#[2] see 'independentFiltering' argument of ?results
+
+# Apply lfcShrink
+MidVsProx.lfc <- lfcShrink(dds, contrast=c("TissueType", "Mid", "Prox"), res = MidVsProx)
+MidVsDist.lfc <- lfcShrink(dds, contrast=c("TissueType", "Mid", "Dist"), res = MidVsDist)
+
+# Remove rows where padj = na
+MvsP_results <- MidVsProx.lfc[!is.na(MidVsProx.lfc$padj),]
+MvsD_results <- MidVsDist.lfc[!is.na(MidVsDist.lfc$padj),]
+
+# Order the results table, retain padj < 0.05
+MvsP_ordered <- MvsP_results[order(MvsP_results$padj),]
+MvsD_ordered <- MvsD_results[order(MvsD_results$padj),]
+statisticallySignificantShrunkPadj_MvsP <- MvsP_ordered[as.vector(na.omit(MvsP_ordered$padj < 0.05)),]
+statisticallySignificantShrunkPadj_MvsD <- MvsD_ordered[as.vector(na.omit(MvsD_ordered$padj < 0.05)),]
+
+
+# Order by log2FC, retain log2FC >1 or < -1
+logOrd_MvP <- statisticallySignificantShrunkPadj_MvsP[order(statisticallySignificantShrunkPadj_MvsP$log2FoldChange),]
+DEmstrgTagsNeg_MvP <- logOrd_MvP[as.vector(na.omit(logOrd_MvP$log2FoldChange < -1.5)),]
+DEmstrg_MvP_upProx <- DEmstrgTagsNeg_MvP
+rm(DEmstrgTagsNeg_MvP)
+DEmstrgTagsPos_MvP <- logOrd_MvP[as.vector(na.omit(logOrd_MvP$log2FoldChange > 1.5)),]
+DEmstrg_MvP_upMid <- DEmstrgTagsPos_MvP
+rm(DEmstrgTagsPos_MvP)
+
+
+logOrd_MvD <- statisticallySignificantShrunkPadj_MvsD[order(statisticallySignificantShrunkPadj_MvsD$log2FoldChange),]
+DEmstrgTagsNeg_MvD <- logOrd_MvD[as.vector(na.omit(logOrd_MvD$log2FoldChange < -1.5)),]
+DEmstrg_MvD_upDist <- DEmstrgTagsNeg_MvD
+rm(DEmstrgTagsNeg_MvD)
+DEmstrgTagsPos_MvD <- logOrd_MvD[as.vector(na.omit(logOrd_MvD$log2FoldChange > 1.5)),]
+DEmstrg_MvD_upMid <- DEmstrgTagsPos_MvD
+rm(DEmstrgTagsPos_MvD)
+
+
+
+stringtieMergedLimbBud <- read.delim("~/rnaSeqData/limbBudData/stringtieMergedLimbBud.gtf", header=FALSE, comment.char="#")
+load("~/rnaSeqData/limbBudData/mstrgToGeneLimbBud.RData")
+
+limbBud_MvP_upProx <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrg_MvP_upProx),mstrgToGeneLimbBud[,1])),2]
+limbBud_MvP_upMid <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrg_MvP_upMid),mstrgToGeneLimbBud[,1])),2]
+
+limbBud_MvD_upDist <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrg_MvD_upDist),mstrgToGeneLimbBud[,1])),2]
+limbBud_MvD_upMid <- mstrgToGeneLimbBud[na.omit(match(rownames(DEmstrg_MvD_upMid),mstrgToGeneLimbBud[,1])),2]
+
+save(limbBud_MvP_upProx,file= "~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvP_upProx.RData")
+save(limbBud_MvP_upMid,file= "~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvP_upMid.RData")
+save(limbBud_MvD_upDist,file= "~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvD_upDist.RData")
+save(limbBud_MvD_upMid,file= "~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvD_upMid.RData")
+
+
+library(limma)
+upregulatedProxGenes_MvP <- strsplit2(limbBud_MvP_upProx,".",fixed=T)[,1]
+upregulatedMidGenes_MvP <- strsplit2(limbBud_MvP_upMid,".",fixed=T)[,1]
+write.csv(upregulatedProxGenes_MvP,file = '~/Documents/limbBudAnalysis/geneLists/upregulatedInProx_MvP.csv')
+write.csv(upregulatedMidGenes_MvP,file = '~/Documents/limbBudAnalysis/geneLists/upregulatedInMid_MvP.csv')
+
+upregulatedDistGenes_MvD <- strsplit2(limbBud_MvD_upDist,".",fixed=T)[,1]
+upregulatedMidGenes_MvD <- strsplit2(limbBud_MvD_upMid,".",fixed=T)[,1]
+write.csv(upregulatedDistGenes_MvD,file = '~/Documents/limbBudAnalysis/geneLists/upregulatedInDist_MvD.csv')
+write.csv(upregulatedMidGenes_MvD,file = '~/Documents/limbBudAnalysis/geneLists/upregulatedInMid_MvD.csv')
+```
+
+
+Look at overlaps between these gene lists:
+```{r}
+load(limbBud_PvD_upProx,file='~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_PvD_upProx.RData')
+load(limbBud_PvD_upDist,file='~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_PvD_upDist.RData')
+
+length(na.omit(match(limbBud_PvD_upDist,limbBud_MvD_upDist)))
+
+library("VennDiagram")
+
+## Up in distal
+venn.diagram(
+x = list(limbBud_PvD_upDist,limbBud_MvD_upDist),
+category.names = c("PvD_upDist" , "MvD_upDist"),
+filename = '~/Documents/limbBudAnalysis/vennDiagrams/Venn_upDist_PvD_MvD',
+        output = TRUE ,
+        imagetype="png" ,
+        height = 680 , 
+        width = 680 , 
+        resolution = 300,
+        compression = "lzw",
+        lwd = 5,
+        lty = 'blank', 
+        fill = c('cornflowerblue', 'yellow'),
+        cex = 1,
+        fontface = "bold",
+        fontfamily = "sans",
+        cat.cex = 0.5,
+        cat.fontface = "bold",
+        cat.default.pos = "outer",
+        cat.pos = c(-27, 27),
+        cat.dist = c(0.055, 0.055),
+        cat.fontfamily = "sans"
+        )
+
+## Up in proximal
+venn.diagram(
+x = list(limbBud_PvD_upProx,limbBud_MvP_upProx),
+category.names = c("PvD_upProx" , "MvP_upProx"),
+filename = '~/Documents/limbBudAnalysis/vennDiagrams/Venn_upProx_PvD_MvP',
+        output = TRUE ,
+        imagetype="png" ,
+        height = 680 , 
+        width = 680 , 
+        resolution = 300,
+        compression = "lzw",
+        lwd = 5,
+        lty = 'blank', 
+        fill = c('cornflowerblue', 'yellow'),
+        cex = 1,
+        fontface = "bold",
+        fontfamily = "sans",
+        cat.cex = 0.5,
+        cat.fontface = "bold",
+        cat.default.pos = "outer",
+        cat.pos = c(-27, 10),
+        cat.dist = c(0.055, 0.135),
+        cat.fontfamily = "sans"
+        )
+
+
+venn.diagram(
+x = list(limbBud_MvP_upMid,limbBud_MvD_upMid),
+category.names = c("MvP_upMid" , "MvD_upMid"),
+filename = '~/Documents/limbBudAnalysis/vennDiagrams/Venn_upMid_MvP_MvD',
+        output = TRUE ,
+        imagetype="png" ,
+        height = 680 , 
+        width = 680 , 
+        resolution = 300,
+        compression = "lzw",
+        lwd = 5,
+        lty = 'blank', 
+        fill = c('cornflowerblue', 'yellow'),
+        cex = 1,
+        fontface = "bold",
+        fontfamily = "sans",
+        cat.cex = 0.5,
+        cat.fontface = "bold",
+        cat.default.pos = "outer",
+        cat.pos = c(4, 15),
+        cat.dist = c(0.055, 0.025),
+        cat.fontfamily = "sans"
+        )
+```
+
+
+
+venn.diagram(
+x = list(rownames(rld_posGenes[[1]]),rownames(rld_posGenes[[2]]),rownames(rld_negGenes[[3]])),
+category.names = c("Wildtype" , "Tbud" , "InjCap"),
+filename = '~/Documents/tuxedoRNASeq/geneAnalysis/DESeq2/Venn_UpregulatedIn_wtTbudInjCap',
+        output = TRUE ,
+        imagetype="png" ,
+        height = 680 , 
+        width = 680 , 
+        resolution = 300,
+        compression = "lzw",
+        lwd = 5,
+        lty = 'blank', 
+        fill = c('cornflowerblue', 'yellow', 'darkorchid1'),
+        cex = 1,
+        fontface = "bold",
+        fontfamily = "sans",
+        cat.cex = 0.5,
+        cat.fontface = "bold",
+        cat.default.pos = "outer",
+        cat.pos = c(-27, 27, 135),
+        cat.dist = c(0.055, 0.055, 0.085),
+        cat.fontfamily = "sans",
+        rotation = 1
+        )
+
+venn.diagram(
+x = list(rownames(rld_negGenes[[1]]),rownames(rld_negGenes[[2]]),rownames(rld_posGenes[[3]])),
+category.names = c("Nr" , "PNT" , "ConCap"),
+filename = '~/Documents/tuxedoRNASeq/geneAnalysis/DESeq2/Venn_UpregulatedIn_nrPntConCap',
+        output = TRUE ,
+        imagetype="png" ,
+        height = 680 , 
+        width = 680 , 
+        resolution = 300,
+        compression = "lzw",
+        lwd = 5,
+        lty = 'blank', 
+        fill = c('cornflowerblue', 'yellow', 'darkorchid1'),
+        cex = 1,
+        fontface = "bold",
+        fontfamily = "sans",
+        cat.cex = 0.5,
+        cat.fontface = "bold",
+        cat.default.pos = "outer",
+        cat.pos = c(-27, 27, 135),
+        cat.dist = c(0.055, 0.055, 0.085),
+        cat.fontfamily = "sans",
+        rotation = 1
+        )
