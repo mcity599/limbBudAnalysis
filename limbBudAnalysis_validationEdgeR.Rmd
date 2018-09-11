@@ -1,0 +1,212 @@
+---
+title: "limbBudAnalysis_validationEdgeR"
+output: html_document
+---
+
+
+Have identified DE genes between different parts of the developing X.laevis limb bud using DESeq2. Will now check this analysis against EdgeR to confirm there are no drastic differences between the two findings. 
+
+```{r}
+rm(list=ls())
+```
+
+Preamble
+```{r}
+
+#source("https://bioconductor.org/biocLite.R")
+#biocLite()
+library(edgeR)
+#biocLite("ggplot2")
+#biocLite("stringr")
+
+library(ggplot2)
+library(stringr)
+library(ggplot2)
+library(matrixStats)
+library(pheatmap)
+```
+
+Loading data
+```{r}
+# Read in count data:
+countData <- as.matrix(read.csv("~/rnaSeqData/limbBudData/prepDE_counts/limbBud_geneCountMatrix.csv", row.names="gene_id"))
+
+# Load sample information:
+sampleInformation <- read.csv("~/Documents/limbBudAnalysis/limbBudPhenodata.csv")
+# Check that sample ID match between countData and sampleInformation
+all(sampleInformation$ids %in% colnames(countData))
+
+# Make variable 'group'
+group <- factor(sampleInformation$TissueType)
+
+# Filter genes not expressed:
+y <- DGEList(counts = countData, group=group)
+keep <- rowSums(cpm(y)>2) >= 2
+table(keep)
+y <- y[keep, , keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+# The calcNormFactors function normalizes for RNA composition by finding a set of scaling factors for the library sizes that minimize the log-fold changes between the samples for most genes. 
+## See EdgeRUsersGuide (https://bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf) section 2.7.3 RNA composition for details. 
+rm(keep)
+```
+
+
+Set design matrix
+
+```{r}
+# Perform quasi-likelihood F-tests: (These are noted in the user guide to be the correct test to use as it uses stricter error rate control by accounting for the uncertainty in dispersion estimates)
+## Refer to EdgeR user's guide Chapter 3 (Specific experimental designs)
+## GLM approach (requires a design matrix, allows more general comparisons to be made)
+
+design <- model.matrix(~0+group, data=y$samples)
+colnames(design) <- levels(y$samples$group)
+design
+```
+
+Calculate dispersion
+```{r}
+# Estimate dispersion:
+yDisp <- estimateDisp(y, design)
+
+# Plot dispersion:
+plotBCV(yDisp)
+pdf("/home/mcity599/Documents/limbBudAnalysis/EdgeR_DEvalidation/dispersionPlot.pdf") # starts writing a PDF to file
+plotBCV(yDisp)                 # makes the actual plot
+           # closes the PDF file
+while (!is.null(dev.list()))  
+  dev.off()
+```
+
+Check that samples cluster together using MDS (variation on multidimensional scaling)
+```{r}
+plotMDS(y, cex=0.4, main="edgeR MDS Plot")
+pdf("/home/mcity599/Documents/limbBudAnalysis/EdgeR_DEvalidation/MDS.pdf") # starts writing a PDF to file
+plotMDS(y, cex=0.4, main="edgeR MDS Plot")               # makes the actual plot
+           # closes the PDF file
+while (!is.null(dev.list()))  
+  dev.off()
+
+# Dimension 1 is the direction that best separates the samples, without regard to whether they are treatments or replicates. Dimension 2 is the next best direction, uncorrelated with the first, that separates the samples.
+```
+
+Calculate fit, setup contrasts, run tests
+```{r}
+fit <- glmQLFit(yDisp, design)
+
+# Use the makeContrasts function to set up potential tests between the three group-pairs:
+my.contrasts <- makeContrasts(DistvsProx=Dist-Prox, DistvsMid=Dist-Mid, ProxvsMid=Prox-Mid, levels=design)
+
+# Run tests:
+qlf.DistProx <- glmQLFTest(fit, contrast=my.contrasts[,"DistvsProx"])
+# topTags(qlf.DistProx)
+qlf.DistMid <- glmQLFTest(fit, contrast=my.contrasts[,"DistvsMid"])
+# topTags(qlf.DistMid)
+qlf.ProxMid <- glmQLFTest(fit, contrast=my.contrasts[,"ProxvsMid"])
+# topTags(qlf.ProxMid)
+
+plotMD(qlf.DistProx,main="Dist vs Prox") |abline(h=c(-1, 1), col="blue")
+plotMD(qlf.DistMid) |abline(h=c(-1, 1), col="blue")
+plotMD(qlf.ProxMid) |abline(h=c(-1, 1), col="blue")
+```
+
+Place three experiments into a list to be treated as one unit for further manipulations:
+```{r}
+qlf_list <- list(qlf.DistProx,qlf.DistMid,qlf.ProxMid)
+names(qlf_list) <- c("DistProx","DistMid","ProxMid")
+rm(qlf.DistMid)
+rm(qlf.DistProx)
+rm(qlf.ProxMid)
+```
+
+Identify genes statistically significantly different between the different groups: 
+```{r}
+qlfSigPTags <- lapply(1:length(qlf_list),function(x) topTags(qlf_list[[x]], n=Inf, adjust.method = "fdr", sort.by ="PValue", p.value = 0.05))
+unlist(lapply(1:3,function(x) dim(qlfSigPTags[[x]]))) # For each item on the list (number of experiments) prints out number of DE genes plus the number of columns (5, logFC, logCPM, F, PValue, FDR)
+# [1] 6425    5 5103    5 1187    5
+
+# Extract only logFC (log2FC) > 1 or < -1
+qlfSigFoldTags <- lapply(1:length(qlfSigPTags),function(i) qlfSigPTags[[i]]$table)
+names(qlfSigFoldTags) <- names(qlf_list)
+
+qlfSigFoldTagsDown <- lapply(1:length(qlfSigPTags),function(t) qlfSigFoldTags[[t]][order(qlfSigFoldTags[[t]]$logFC),][qlfSigFoldTags[[t]][order(qlfSigFoldTags[[t]]$logFC),1] < -1.5,])
+qlfSigFoldTagsUp <- lapply(1:length(qlfSigPTags),function(t) qlfSigFoldTags[[t]][order(qlfSigFoldTags[[t]]$logFC),][qlfSigFoldTags[[t]][order(qlfSigFoldTags[[t]]$logFC),1] >1.5,])
+names(qlfSigFoldTagsDown) <- names(qlf_list)
+names(qlfSigFoldTagsUp) <- names(qlf_list)
+
+save(qlfSigFoldTagsDown,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/qlfSigFoldTagsDown.RData')
+save(qlfSigFoldTagsUp,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/qlfSigFoldTagsUp.RData')
+```
+
+View number of DE genes, convert tags to gene names using the mstrgLimbBud converter
+```{r}
+unlist(lapply(1:3,function(x) length(rownames(qlfSigFoldTagsDown[[x]])))) # 1287  958   98 tags downregulated in the first group (BvsA) of each of the three expts
+unlist(lapply(1:3,function(x) length(rownames(qlfSigFoldTagsUp[[x]])))) # 526 375 250 tags upregulated in the frist group in each of the three expts
+
+# Extract mstrg tags, convert
+tagsDown <- lapply(1:3,function(x) rownames(qlfSigFoldTagsDown[[x]]))
+tagsUp <- lapply(1:3,function(x) rownames(qlfSigFoldTagsUp[[x]]))
+# Convert
+load("~/Documents/limbBudAnalysis/objectsLimbBud/mstrgToGeneLimbBud.RData")
+EdgeR_downRegGenes <- lapply(1:3,function(b) mstrgToGeneLimbBud[na.omit(match(tagsDown[[b]],mstrgToGeneLimbBud[,1])),2])
+EdgeR_upRegGenes <- lapply(1:3,function(b) mstrgToGeneLimbBud[na.omit(match(tagsUp[[b]],mstrgToGeneLimbBud[,1])),2])
+
+names(EdgeR_downRegGenes) <- names(qlf_list)
+names(EdgeR_upRegGenes) <- names(qlf_list)
+```
+
+This is an ok object for storing data for further manipulations, but it is worth saving new objects/writing gene lists with more informative names. 
+```{r}
+## Perform some visualisation of the data to confirm what each part of the object represents (e.g., upregulated in distal vs prox etc.,) and create new, named objects/csv:
+
+names(EdgeR_downRegGenes)
+# Refer back to the previous level of objects (e.g., tasgDown) to retrieve the raw mstrg tag names, compare to the original counts:
+y[match(tagsDown[[1]][1],rownames(y)),] # shows counts are high in prox, low in dist. From the line above, know this is an analysis of prox vs dist. Therefore:
+
+edgeR_PvD_upProx <- EdgeR_downRegGenes[[1]]
+edgeR_PvD_upDist <- EdgeR_upRegGenes[[1]]
+
+edgeR_DvM_upMid <- EdgeR_downRegGenes[[2]]
+edgeR_DvM_upDist <- EdgeR_upRegGenes[[2]]
+
+edgeR_PvM_upMid <- EdgeR_downRegGenes[[3]]
+edgeR_PvM_upProx <- EdgeR_upRegGenes[[3]]
+
+save(edgeR_PvD_upProx,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvD_upProx.RData')
+save(edgeR_PvD_upDist,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvD_upDist.RData')
+
+save(edgeR_DvM_upMid,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/edgeR_DvM_upMid.RData')
+save(edgeR_DvM_upDist,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/edgeR_DvM_upDist.RData')
+
+save(edgeR_PvM_upMid,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvM_upMid.RData')
+save(edgeR_PvM_upProx,file='/home/mcity599/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvM_upProx.RData')
+
+# Compare EdgeR with DESeq2 results:
+rm(list=ls())
+# Load all DE gene objects:
+load("~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvD_upDist.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvD_upMid.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvP_upMid.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_MvP_upProx.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_PvD_upDist.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/limbBud_PvD_upProx.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvD_upProx.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvD_upDist.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/edgeR_DvM_upMid.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/edgeR_DvM_upDist.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvM_upMid.RData")
+load("~/Documents/limbBudAnalysis/objectsLimbBud/edgeR_PvM_upProx.RData")
+
+length(limbBud_MvD_upDist) # 239
+length(edgeR_DvM_upDist) # 322
+length(na.omit(match(limbBud_MvD_upDist,edgeR_DvM_upDist))) # 238
+
+length(limbBud_MvD_upMid) # 665
+length(edgeR_DvM_upMid) # 761
+length(na.omit(match(limbBud_MvD_upMid,edgeR_DvM_upMid))) # 664
+
+length(limbBud_PvD_upDist) # 364
+length(edgeR_PvD_upDist) # 446
+length(na.omit(match(limbBud_PvD_upDist,edgeR_PvD_upDist))) # 363
+```
+EdgeR validates the findings of DESeq2, often with an additional set of genes called DE
+

@@ -30,6 +30,7 @@ dds <- DESeqDataSetFromMatrix(countData = countData, colData = sampleInformation
 keep <- rowSums(cpm(counts(dds))>2) >=2
 table(keep)
 dds <- dds[keep,]
+rm(keep)
 ```
 
 ```{r}
@@ -408,60 +409,28 @@ filename = '~/Documents/limbBudAnalysis/vennDiagrams/Venn_upMid_MvP_MvD',
         cat.cex = 0.5,
         cat.fontface = "bold",
         cat.default.pos = "outer",
-        cat.pos = c(4, 15),
+        cat.pos = c(1985, 1985),
         cat.dist = c(0.055, 0.025),
         cat.fontfamily = "sans"
         )
 ```
 
+An interesting finding here is 32 genes upregulated in Mid vs Prox, but not found in Dist vs Prox - what are these 32 genes which are mid-specific. How do they fit into distal regulation (e.g., is their absence required for dist?).
 
 
-venn.diagram(
-x = list(rownames(rld_posGenes[[1]]),rownames(rld_posGenes[[2]]),rownames(rld_negGenes[[3]])),
-category.names = c("Wildtype" , "Tbud" , "InjCap"),
-filename = '~/Documents/tuxedoRNASeq/geneAnalysis/DESeq2/Venn_UpregulatedIn_wtTbudInjCap',
-        output = TRUE ,
-        imagetype="png" ,
-        height = 680 , 
-        width = 680 , 
-        resolution = 300,
-        compression = "lzw",
-        lwd = 5,
-        lty = 'blank', 
-        fill = c('cornflowerblue', 'yellow', 'darkorchid1'),
-        cex = 1,
-        fontface = "bold",
-        fontfamily = "sans",
-        cat.cex = 0.5,
-        cat.fontface = "bold",
-        cat.default.pos = "outer",
-        cat.pos = c(-27, 27, 135),
-        cat.dist = c(0.055, 0.055, 0.085),
-        cat.fontfamily = "sans",
-        rotation = 1
-        )
+```{r}
+length(na.omit(match(limbBud_MvP_upProx, limbBud_PvD_upProx))) # 154
+length(limbBud_MvP_upProx)  # 186
+length(limbBud_PvD_upProx) # 925
+test <- limbBud_MvP_upProx[-na.omit(match(limbBud_PvD_upProx,limbBud_MvP_upProx))]
+```
 
-venn.diagram(
-x = list(rownames(rld_negGenes[[1]]),rownames(rld_negGenes[[2]]),rownames(rld_posGenes[[3]])),
-category.names = c("Nr" , "PNT" , "ConCap"),
-filename = '~/Documents/tuxedoRNASeq/geneAnalysis/DESeq2/Venn_UpregulatedIn_nrPntConCap',
-        output = TRUE ,
-        imagetype="png" ,
-        height = 680 , 
-        width = 680 , 
-        resolution = 300,
-        compression = "lzw",
-        lwd = 5,
-        lty = 'blank', 
-        fill = c('cornflowerblue', 'yellow', 'darkorchid1'),
-        cex = 1,
-        fontface = "bold",
-        fontfamily = "sans",
-        cat.cex = 0.5,
-        cat.fontface = "bold",
-        cat.default.pos = "outer",
-        cat.pos = c(-27, 27, 135),
-        cat.dist = c(0.055, 0.055, 0.085),
-        cat.fontfamily = "sans",
-        rotation = 1
-        )
+Reverse convert to get mstrg tags, assess in dds object:
+
+```{r}
+mstrgToGeneLimbBud[match(test,as.vector(mstrgToGeneLimbBud[,2])),]
+testMSTRG <- mstrgToGeneLimbBud[match(test,as.vector(mstrgToGeneLimbBud[,2])),1]
+assay(dds)[match(testMSTRG,names(dds)),]
+
+```
+
