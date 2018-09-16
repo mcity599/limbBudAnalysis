@@ -1,0 +1,39 @@
+---
+title: "limbBudAnalysis_geneNetworksWGCNA"
+output: html_document
+---
+
+
+
+```{r}
+source("https://bioconductor.org/biocLite.R")
+biocLite()
+biocLite("WGCNA")
+# Flags not allowing multi-threading in wgcna, prompts use of this command to allow:
+library(WGCNA)
+allowWGCNAThreads()
+```
+
+To start this new type of analysis I will run through a tutorial posted by the original authors. 
+https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/Tutorials/
+This site includes R scripts to download, which I have done and followed. I will be working with these scripts in the background. 
+
+
+Select data:
+====================================================================================
+Tutorial selected 3,600 probes out of a larger set of 20,000 on the basis of "most variable and most connected(??) probes".
+- Since this ran easily enough on my machine, I will take 5,000 probes.
+Selected probesets based on:
+- top5000variance
+- top5000StDv
+- top5000mad (median absolute deviation)
+- all statistically significant probes
+- all biologically and statistically significant probes (log2FC > 1.5)
+
+Load up the dds object from the start of limbBudAnalysis_markdown.Rmd
+```{r}
+# variance
+top5000VarianceNames <- names(sort(apply(assay(dds),1,var),decreasing=T))[1:5000]
+
+```
+

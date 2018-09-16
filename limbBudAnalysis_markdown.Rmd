@@ -88,6 +88,7 @@ summary(DistVsProx)
 # [2] see 'independentFiltering' argument of ?results
 
 
+
 # Apply lfcShrink
 DistVsProx.lfc <- lfcShrink(dds, contrast=c("TissueType", "Dist", "Prox"), res = DistVsProx)
 summary(DistVsProx.lfc)
